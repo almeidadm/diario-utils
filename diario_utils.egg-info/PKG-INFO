@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: diario-utils
+Version: 0.1.0
+Summary: Shared infrastructure utilities for Diario RAG ETL
+Requires-Python: <3.13,>=3.12
+Requires-Dist: pyarrow==15.0
+Requires-Dist: duckdb>=0.10
+Requires-Dist: diario-contract
+Provides-Extra: s3
+Requires-Dist: boto3>=1.34; extra == "s3"

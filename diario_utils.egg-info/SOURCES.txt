@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+diario_utils.egg-info/PKG-INFO
+diario_utils.egg-info/SOURCES.txt
+diario_utils.egg-info/dependency_links.txt
+diario_utils.egg-info/requires.txt
+diario_utils.egg-info/top_level.txt
+diario_utils/logging/logging.py
+diario_utils/storage/backend.py
+diario_utils/storage/base.py
+diario_utils/storage/duckdb.py
+diario_utils/storage/local.py
+diario_utils/storage/parquet.py
+diario_utils/storage/paths.py
