@@ -1,0 +1,47 @@
+[project]
+name = "diario-utils"
+version = "0.1.0"
+description = "Shared infrastructure utilities for Diario RAG ETL"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyarrow==15.0",
+    "duckdb>=0.10",
+    "diario-contract",
+]
+
+[project.optional-dependencies]
+s3 = ["boto3>=1.34"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "taskipy>=1.14.1",
+    "black>=25.12.0",
+    "flake8>=7.3.0",
+    "isort>=7.0.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+known_first_party = ["diario_utils"]
+skip_gitignore = true
+
+[tool.taskipy.tasks]
+lint = "flake8 diario_utils"
+format = "isort diario_utils && black diario_utils"
+check = "task format && task lint"
+test = "pytest tests/ -v"
+
+
+[tool.uv.sources]
+diario-contract = { git = "ssh://git@github.com/almeidadm/diario-contract.git", rev = "v1.0.5" }
