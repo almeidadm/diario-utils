@@ -1,10 +1,10 @@
 [project]
 name = "diario-utils"
-version = "0.1.1"
+version = "1.1.1"
 description = "Shared infrastructure utilities for Diario RAG ETL"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pyarrow==15.0",
+    "pyarrow==22.0.0",
     "duckdb>=0.10",
     "diario-contract",
 ]
