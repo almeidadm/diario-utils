@@ -1,7 +1,28 @@
 import logging
-import logging.config
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+
+
+def _build_console_handler(
+    level: str,
+    formatter: logging.Formatter,
+) -> logging.Handler:
+    try:
+        from rich.logging import RichHandler
+    except ImportError:
+        handler: logging.Handler = logging.StreamHandler()
+    else:
+        handler = RichHandler(
+            markup=True,
+            rich_tracebacks=True,
+            show_time=True,
+            show_path=True,
+            log_time_format="%H:%M:%S",
+        )
+
+    handler.setLevel(level)
+    handler.setFormatter(formatter)
+    return handler
 
 
 def setup_logging(
@@ -23,67 +44,40 @@ def setup_logging(
             "[%(filename)s:%(lineno)d]"
         )
 
-    config: dict[str, Any] = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "standard": {
-                "format": format,
-                "datefmt": "%Y-%m-%d %H:%M:%S",
-            },
-        },
-        "handlers": {
-            "console": {
-                "()": "rich.logging.RichHandler",
-                "level": level,
-                "markup": True,
-                "rich_tracebacks": True,
-                "show_time": True,
-                "show_path": True,
-                "log_time_format": "%H:%M:%S",
-            },
-            "file": {
-                "class": "logging.FileHandler",
-                "level": level,
-                "formatter": "standard",
-                "filename": "app.log",
-                "mode": "a",
-                "encoding": "utf-8",
-            },
-        },
-        "loggers": {
-            "diario_crawler": {
-                "handlers": ["file"],
-                "level": level,
-                "propagate": False,
-            },
-        },
-        "root": {
-            "handlers": ["file"],
-            "level": "ERROR",
-        },
-    }
+    formatter = logging.Formatter(format, datefmt="%Y-%m-%d %H:%M:%S")
 
-    if log_file:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        handler.close()
+
+    handlers = [_build_console_handler(level=level, formatter=formatter)]
+
+    if log_file is not None:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        config["handlers"]["file"] = {
-            "class": "logging.handlers.RotatingFileHandler",
-            "level": level,
-            "formatter": "standard",
-            "filename": str(log_path),
-            "maxBytes": 10_485_760,  # 10MB
-            "backupCount": 5,
-            "encoding": "utf-8",
-        }
+        file_handler = RotatingFileHandler(
+            filename=str(log_path),
+            maxBytes=10_485_760,  # 10MB
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
 
-        config["loggers"]["diario_crawler"]["handlers"].append("file")
-        config["root"]["handlers"].append("file")
-
-    logging.config.dictConfig(config)
+    for handler in handlers:
+        root_logger.addHandler(handler)
 
     logger = logging.getLogger("diario_crawler")
+    logger.setLevel(level)
+    logger.propagate = True
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+
     logger.info(f"Logging configurado (level: {level})")
 
 
