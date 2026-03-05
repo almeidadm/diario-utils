@@ -1,6 +1,6 @@
 [project]
 name = "diario-utils"
-version = "0.1.0"
+version = "0.1.1"
 description = "Shared infrastructure utilities for Diario RAG ETL"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -44,4 +44,4 @@ test = "pytest tests/ -v"
 
 
 [tool.uv.sources]
-diario-contract = { git = "ssh://git@github.com/almeidadm/diario-contract.git", rev = "v1.0.5" }
+diario-contract = { git = "https://github.com/almeidadm/diario-contract", rev = "v1.1.2" }
