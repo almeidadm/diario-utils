@@ -108,8 +108,8 @@ wheels = [
 
 [[package]]
 name = "diario-contract"
-version = "1.1.2"
-source = { git = "https://github.com/almeidadm/diario-contract?rev=v1.1.2#6a845a92bd0b29663dab52f0793126efd63977e5" }
+version = "1.2.0"
+source = { git = "https://github.com/almeidadm/diario-contract?rev=v1.2.0#e7c052363dc208497def952ba17953a6ac7a6750" }
 dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -145,7 +145,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.34" },
-    { name = "diario-contract", git = "https://github.com/almeidadm/diario-contract?rev=v1.1.2" },
+    { name = "diario-contract", git = "https://github.com/almeidadm/diario-contract?rev=v1.2.0" },
     { name = "duckdb", specifier = ">=0.10" },
     { name = "pyarrow", specifier = "==22.0.0" },
 ]

@@ -44,4 +44,4 @@ test = "pytest tests/ -v"
 
 
 [tool.uv.sources]
-diario-contract = { git = "https://github.com/almeidadm/diario-contract", rev = "v1.1.2" }
+diario-contract = { git = "https://github.com/almeidadm/diario-contract", rev = "v1.2.0" }
