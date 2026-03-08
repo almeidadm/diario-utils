@@ -110,6 +110,27 @@ def test_append_gazettes_dedup_by_edition_and_article(tmp_path: Path):
     assert articles.get_column("raw_content_text")[0] == "new"
 
 
+def test_append_gazettes_handles_text_and_bytes(tmp_path: Path):
+    client = StorageClient(StorageConfig(base_path=tmp_path, duckdb_path=":memory:"))
+    text_edition = _build_edition("ed-text", "2026-03-01", "a-text", content="hello")
+    bytes_edition = _build_edition(
+        "ed-bytes", "2026-03-02", "a-bytes", content=b"\x01\x02"
+    )
+
+    client.append_gazettes([text_edition], city_id="123")
+    client.append_gazettes([bytes_edition], city_id="123")
+
+    articles = client.load_articles(city_id="123")
+
+    assert articles.height == 2
+    assert articles.schema["raw_content_bytes"] == pl.Binary
+    assert articles.schema["raw_content_text"] == pl.Utf8
+
+    bytes_row = articles.filter(pl.col("article_id") == "a-bytes")
+    assert bytes_row.get_column("raw_content_bytes")[0] == b"\x01\x02"
+    assert bytes_row.get_column("raw_content_text")[0] is None
+
+
 def test_review_flow_and_promotion(tmp_path: Path):
     client = StorageClient(StorageConfig(base_path=tmp_path, duckdb_path=":memory:"))
     chunk_df = pl.DataFrame(

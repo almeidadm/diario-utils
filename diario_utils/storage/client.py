@@ -73,6 +73,48 @@ class StorageClient:
             return month_from_date(partition_keys["publication_date"])
         raise ValueError("partition_keys must include 'month' or 'publication_date'")
 
+    def _align_frames(
+        self, existing: pl.DataFrame, incoming: pl.DataFrame
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """
+        Harmonize schemas so a diagonal concat won't fail.
+
+        - Adds missing columns as Null.
+        - If one side is Null, cast it to the other's dtype.
+        - If both have concrete but different dtypes, cast both to Utf8 as a safe fallback.
+        """
+        all_cols = set(existing.columns) | set(incoming.columns)
+
+        if missing := [c for c in all_cols if c not in existing.columns]:
+            existing = existing.with_columns([pl.lit(None).alias(c) for c in missing])
+        if missing := [c for c in all_cols if c not in incoming.columns]:
+            incoming = incoming.with_columns([pl.lit(None).alias(c) for c in missing])
+
+        casts_existing: list[pl.Expr] = []
+        casts_incoming: list[pl.Expr] = []
+
+        for col in all_cols:
+            left_dtype = existing.schema[col]
+            right_dtype = incoming.schema[col]
+            if left_dtype == right_dtype:
+                continue
+            if left_dtype == pl.Null:
+                casts_existing.append(pl.col(col).cast(right_dtype))
+                continue
+            if right_dtype == pl.Null:
+                casts_incoming.append(pl.col(col).cast(left_dtype))
+                continue
+            resolved = pl.Utf8
+            casts_existing.append(pl.col(col).cast(resolved))
+            casts_incoming.append(pl.col(col).cast(resolved))
+
+        if casts_existing:
+            existing = existing.with_columns(casts_existing)
+        if casts_incoming:
+            incoming = incoming.with_columns(casts_incoming)
+
+        return existing, incoming
+
     def _write_table(
         self,
         layer: Layer,
@@ -122,6 +164,7 @@ class StorageClient:
             existing = self.backend.read_parquet(
                 str(table_path.relative_to(self.base_path))
             )
+            existing, df = self._align_frames(existing, df)
             combined = pl.concat([existing, df], how="diagonal")
         else:
             combined = df

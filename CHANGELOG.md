@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.1 - 2026-03-08
+- Corrige concatenação de Parquet quando colunas `Null` recebem bytes, alinhando schemas antes de `append_gazettes` (evita erro “type Binary is incompatible with expected type Null”).
+- Aplica alinhamento de schema a todas as tabelas escritas por `_write_table`.
+- Adiciona teste cobrindo mistura de `raw_content_text` e `raw_content_bytes` no mesmo mês.
+
 ## 1.3.0 - 2026-03-08
 - Breaking: `append_gazettes` agora aceita apenas `GazetteEdition` e grava duas tabelas (`gazette.parquet` + `articles.parquet`) por partição Bronze.
 - Adiciona `load_gazettes` e `load_articles` para leitura filtrada por cidade/mês.
