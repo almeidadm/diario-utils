@@ -2,12 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.0 - 2026-03-08
+- Breaking: `append_gazettes` agora aceita apenas `GazetteEdition` e grava duas tabelas (`gazette.parquet` + `articles.parquet`) por partição Bronze.
+- Adiciona `load_gazettes` e `load_articles` para leitura filtrada por cidade/mês.
+- Inclui manifesto e deduplicação por `edition_id` e `article_id` ao escrever edições e artigos.
+- Atualiza documentação (AGENTS, README, docs/storage.md) com novos schemas e exemplos.
+
 ## 1.1.5 - 2026-03-08
 - Migra a documentação para Markdown puro, removendo configuração e artefatos Sphinx.
 - Adiciona docstrings às classes, métodos e funções públicas de logging e storage.
 - Ajusta ambiente de testes para resolver importação de `diario_utils`.
 
-## 1.2.0 - 2026-03-07
+## 1.1.4 - 2026-03-07
 - Reescreve módulo `diario_utils.storage` com API em Polars e suporte a camadas Bronze/Silver/Gold.
 - Adiciona manifests de auditoria (hash, row_count, schema_version) por partição.
 - Implementa fluxo de revisão e promoção para Gold, incluindo `list_needing_review`, `apply_review` e `promote_to_gold`.

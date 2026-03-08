@@ -39,6 +39,8 @@ def manifest_path(partition_path: Path) -> Path:
     return partition_path / "manifest.json"
 
 
-def table_filename(table: Literal["gazette", "chunks", "vectors"]) -> str:
+def table_filename(
+    table: Literal["gazette", "articles", "chunks", "vectors"]
+) -> str:
     """Map logical table name to Parquet filename."""
     return f"{table}.parquet"

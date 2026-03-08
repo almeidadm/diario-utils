@@ -13,20 +13,60 @@ Shared infrastructure utilities for the Diario RAG ETL, focused on local medalli
 
 ## Quick start
 ```python
-from diario_utils.storage import StorageClient, StorageConfig
 import polars as pl
+from diario_contract.article.article import Article
+from diario_contract.article.content import ArticleContent
+from diario_contract.article.metadata import ArticleMetadata
+from diario_contract.enums.content_type import ContentType
+from diario_contract.gazette.edition import GazetteEdition
+from diario_contract.gazette.metadata import GazetteMetadata
+from diario_utils.storage import StorageClient, StorageConfig
 
 client = StorageClient(StorageConfig(base_path="data"))
-chunks = pl.DataFrame([
-    {
-        "chunk_id": "c1",
-        "city_id": "123",
-        "publication_date": "2026-03-01",
-        "publication_month": "202603",
-        "text": "example",
-        "needs_review": True,
-        "parser_tag": "v1",
-    }
-])
-client.append_chunks(chunks, {"city_id": "123", "publication_date": "2026-03-01", "parser_tag": "v1"})
+
+edition = GazetteEdition(
+    metadata=GazetteMetadata(
+        edition_id="ed1",
+        publication_date="2026-03-01",
+        edition_number=1,
+        supplement=False,
+        edition_type_id=1,
+        edition_type_name="regular",
+        pdf_url="http://example.com",
+    ),
+    articles=[
+        Article(
+            metadata=ArticleMetadata(
+                article_id="a1",
+                edition_id="ed1",
+                hierarchy_path=["root"],
+                title="title",
+                identifier="id-1",
+                protocol=None,
+            ),
+            content=ArticleContent(
+                raw_content="content", content_type=ContentType.TEXT
+            ),
+        )
+    ],
+)
+client.append_gazettes([edition], city_id="123")
+
+chunks = pl.DataFrame(
+    [
+        {
+            "chunk_id": "c1",
+            "city_id": "123",
+            "publication_date": "2026-03-01",
+            "publication_month": "202603",
+            "text": "example",
+            "needs_review": True,
+            "parser_tag": "v1",
+        }
+    ]
+)
+client.append_chunks(
+    chunks,
+    {"city_id": "123", "publication_date": "2026-03-01", "parser_tag": "v1"},
+)
 ```

@@ -37,9 +37,15 @@ data/
 
 ## Esquemas principais (Parquet)
 - **gazette.parquet (Bronze)**  
-  - `ingestion_run_id` (string), `crawler_tag` (string), `city_id` (string), `publication_date` (date), `edition_id` (string)  
+  - `edition_id` (string), `city_id` (string), `publication_date` (date), `publication_month` (string yyyymm)  
   - `edition_number` (int), `supplement` (bool), `edition_type_id` (int), `edition_type_name` (string)  
-  - `pdf_url` (string), `content_type` (enum: html/pdf/text), `raw_content` (binary or string)
+  - `pdf_url` (string), `crawler_tag` (string), `ingestion_run_id` (string), `total_articles` (int)
+
+- **articles.parquet (Bronze)**  
+  - `article_id` (string), `edition_id` (string), `city_id` (string), `publication_date` (date), `publication_month` (string yyyymm)  
+  - `title` (string), `hierarchy_path` (array\<string\>), `depth` (int), `identifier` (string), `protocol` (string | null)  
+  - `content_type` (enum: html/pdf/text), `raw_content_text` (string | null), `raw_content_bytes` (binary | null)  
+  - `crawler_tag` (string), `ingestion_run_id` (string)
 
 - **chunks.parquet (Silver/Gold)**  
   - Identidade: `chunk_id` (uuid), `article_id` (string), `edition_id` (string), `city_id` (string)  
@@ -102,12 +108,14 @@ flowchart TD
   - `StorageConfig(base_path, duckdb_path=":memory:", compression="ZSTD", threads=4)`
 
 - **Leitura/consulta**  
+  - `load_gazettes(city_id=None, month=None, columns=None) -> pl.DataFrame`  
+  - `load_articles(city_id=None, month=None, columns=None) -> pl.DataFrame`  
   - `load_chunks(layer="silver", city_id=None, month=None, parser_tag=None, columns=None) -> pl.DataFrame`  
   - `load_vectors(embedding_model_tag=None, retrieval_profile=None, columns=None) -> pl.DataFrame`  
   - `query(sql: str, params: dict=None) -> pl.DataFrame` (pass-through para DuckDB; suporta joins leves/intensos)
 
 - **Escrita**  
-  - `append_gazettes(df, partition_keys: dict)`  
+  - `append_gazettes(editions: Iterable[GazetteEdition], city_id: str, crawler_tag=None, ingestion_run_id=None)`  
   - `append_chunks(df, partition_keys: dict)`  
   - `append_vectors(df, partition_keys: dict)`  
   - Todas calculam hash, atualizam `manifest.json` e validam schema via Pydantic.
@@ -133,7 +141,7 @@ flowchart TD
 - Separação clara de schema/contratos em `diario-contract` para reutilizar em jobs cloud.
 
 ## Interação com a cadeia RAG
-- `diario-crawler` usa `append_gazettes` (layer bronze).
+- `diario-crawler` usa `append_gazettes` (layer bronze) escrevendo `gazette.parquet` + `articles.parquet`.
 - `diario-parser` lê bronze, escreve silver com flags de qualidade e tags de regex/parser.
 - `diario-review` consome silver com `needs_review=true`, aplica `apply_review`, promove quando aprovado.
 - `diario-embedding` lê silver/gold conforme modo, escreve vectors com `embedding_model_tag`.

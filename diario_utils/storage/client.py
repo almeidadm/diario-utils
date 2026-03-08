@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
 import duckdb
 import polars as pl
+from diario_contract.gazette.edition import GazetteEdition
 
 from diario_utils.storage.base import Storage
 from diario_utils.storage.config import StorageConfig
@@ -22,6 +24,16 @@ from diario_utils.storage.paths import (
 logger = logging.getLogger(__name__)
 
 Layer = Literal["bronze", "silver", "gold"]
+
+
+@dataclass(slots=True)
+class GazetteWriteResult:
+    """Paths written for a bronze gazette batch."""
+
+    city_id: str
+    publication_month: str
+    gazette_path: Path
+    articles_path: Path | None
 
 
 class StorageClient:
@@ -64,7 +76,7 @@ class StorageClient:
     def _write_table(
         self,
         layer: Layer,
-        table: Literal["gazette", "chunks", "vectors"],
+        table: Literal["gazette", "articles", "chunks", "vectors"],
         df: pl.DataFrame,
         key_columns: list[str],
         partition_keys: dict[str, Any],
@@ -130,7 +142,7 @@ class StorageClient:
 
     def _scan_partition(
         self,
-        table: Literal["gazette", "chunks", "vectors"],
+        table: Literal["gazette", "articles", "chunks", "vectors"],
         layer: Layer,
         city_id: str | None,
         month: str | None,
@@ -188,17 +200,108 @@ class StorageClient:
 
     # ----------------------------- writes ------------------------------
     def append_gazettes(
-        self, df: pl.DataFrame, partition_keys: dict[str, Any], schema_version: int = 1
-    ) -> Path:
-        """Append gazette rows into bronze layer, deduplicating by edition_id."""
-        return self._write_table(
-            layer="bronze",
-            table="gazette",
-            df=df,
-            key_columns=["edition_id"],
-            partition_keys=partition_keys,
-            schema_version=schema_version,
-        )
+        self,
+        editions: Iterable[GazetteEdition],
+        city_id: str,
+        crawler_tag: str | None = None,
+        ingestion_run_id: str | None = None,
+        schema_version: int = 1,
+    ) -> list[GazetteWriteResult]:
+        """Append GazetteEdition objects into bronze, writing gazette and articles tables."""
+        editions_list = list(editions)
+        if not editions_list:
+            return []
+
+        grouped: dict[str, list[GazetteEdition]] = {}
+        for edition in editions_list:
+            month = month_from_date(edition.publication_date)
+            grouped.setdefault(month, []).append(edition)
+
+        results: list[GazetteWriteResult] = []
+        for month, month_editions in grouped.items():
+            gaz_rows: list[dict[str, Any]] = []
+            article_rows: list[dict[str, Any]] = []
+            for edition in month_editions:
+                md = edition.metadata
+                pub_date = md.publication_date
+                pub_month = month_from_date(pub_date)
+                gaz_rows.append(
+                    {
+                        "edition_id": md.edition_id,
+                        "city_id": city_id,
+                        "publication_date": pub_date,
+                        "publication_month": pub_month,
+                        "edition_number": md.edition_number,
+                        "supplement": md.supplement,
+                        "edition_type_id": md.edition_type_id,
+                        "edition_type_name": md.edition_type_name,
+                        "pdf_url": md.pdf_url,
+                        "crawler_tag": crawler_tag,
+                        "ingestion_run_id": ingestion_run_id,
+                        "total_articles": edition.total_articles,
+                    }
+                )
+                for article in edition.articles:
+                    content = article.content
+                    raw = content.raw_content
+                    raw_text: str | None = None
+                    raw_bytes: bytes | None = None
+                    if isinstance(raw, bytes):
+                        raw_bytes = raw
+                    else:
+                        raw_text = raw
+                    article_rows.append(
+                        {
+                            "article_id": article.article_id,
+                            "edition_id": article.metadata.edition_id,
+                            "city_id": city_id,
+                            "publication_date": pub_date,
+                            "publication_month": pub_month,
+                            "title": article.title,
+                            "hierarchy_path": article.hierarchy_path,
+                            "depth": article.depth,
+                            "identifier": article.metadata.identifier,
+                            "protocol": article.metadata.protocol,
+                            "content_type": content.content_type.value,
+                            "raw_content_text": raw_text,
+                            "raw_content_bytes": raw_bytes,
+                            "crawler_tag": crawler_tag,
+                            "ingestion_run_id": ingestion_run_id,
+                        }
+                    )
+
+            gaz_df = pl.DataFrame(gaz_rows)
+            gaz_path = self._write_table(
+                layer="bronze",
+                table="gazette",
+                df=gaz_df,
+                key_columns=["edition_id"],
+                partition_keys={"city_id": city_id, "month": month},
+                schema_version=schema_version,
+            )
+
+            articles_path: Path | None = None
+            if article_rows:
+                articles_df = pl.DataFrame(article_rows)
+                articles_path = self._write_table(
+                    layer="bronze",
+                    table="articles",
+                    df=articles_df,
+                    key_columns=["article_id"],
+                    partition_keys={"city_id": city_id, "month": month},
+                    schema_version=schema_version,
+                )
+
+            results.append(
+                GazetteWriteResult(
+                    city_id=city_id,
+                    publication_month=month,
+                    gazette_path=gaz_path,
+                    articles_path=articles_path,
+                )
+            )
+
+        return results
 
     def append_chunks(
         self,
@@ -251,6 +354,60 @@ class StorageClient:
         )
 
     # ----------------------------- reads -------------------------------
+    def load_gazettes(
+        self,
+        city_id: str | None = None,
+        month: str | None = None,
+        columns: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """Load gazette metadata from bronze, filtered by city/month."""
+        paths = self._scan_partition(
+            table="gazette",
+            layer="bronze",
+            city_id=city_id,
+            month=month,
+            parser_tag=None,
+            embedding_model_tag=None,
+        )
+        if not paths:
+            return pl.DataFrame()
+        lazy = pl.scan_parquet(paths, hive_partitioning=False)
+        schema = lazy.schema
+        if columns:
+            lazy = lazy.select([pl.col(c) for c in columns if c in schema])
+        if city_id and "city_id" in schema:
+            lazy = lazy.filter(pl.col("city_id") == city_id)
+        if month and "publication_month" in schema:
+            lazy = lazy.filter(pl.col("publication_month") == month)
+        return lazy.collect()
+
+    def load_articles(
+        self,
+        city_id: str | None = None,
+        month: str | None = None,
+        columns: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """Load gazette articles from bronze, filtered by city/month."""
+        paths = self._scan_partition(
+            table="articles",
+            layer="bronze",
+            city_id=city_id,
+            month=month,
+            parser_tag=None,
+            embedding_model_tag=None,
+        )
+        if not paths:
+            return pl.DataFrame()
+        lazy = pl.scan_parquet(paths, hive_partitioning=False)
+        schema = lazy.schema
+        if columns:
+            lazy = lazy.select([pl.col(c) for c in columns if c in schema])
+        if city_id and "city_id" in schema:
+            lazy = lazy.filter(pl.col("city_id") == city_id)
+        if month and "publication_month" in schema:
+            lazy = lazy.filter(pl.col("publication_month") == month)
+        return lazy.collect()
+
     def load_chunks(
         self,
         layer: Literal["silver", "gold"] = "silver",

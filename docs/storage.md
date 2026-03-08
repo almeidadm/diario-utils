@@ -8,6 +8,7 @@ Este documento descreve o módulo de persistência local seguindo as camadas Bro
   data/
     bronze/city_id=123/yyyymm=202603/
       gazette.parquet
+      articles.parquet
       manifest.json
     silver/city_id=123/yyyymm=202603/parser_tag=v1/
       chunks.parquet
@@ -24,14 +25,16 @@ Este documento descreve o módulo de persistência local seguindo as camadas Bro
 ```mermaid
 flowchart TD
   A[append_gazettes] -->|bronze| B[gazette.parquet]
+  A -->|bronze| BA[articles.parquet]
   B -->|filters| Q[query]
+  BA --> Q
   C[append_chunks silver] -->|silver| D[chunks.parquet]
   D --> E[list_needing_review]
   E --> F[apply_review]
   F --> G[promote_to_gold]
-  G --> H[chunks (gold)]
+  G --> H["chunks (gold)"]
   I[append_vectors] --> H
-  H --> R[load_chunks (gold)]
+  H --> R["load_chunks (gold)"]
   R --> Q
 ```
 
@@ -39,14 +42,44 @@ flowchart TD
 
 ```python
 import polars as pl
+from diario_contract.article.article import Article
+from diario_contract.article.content import ArticleContent
+from diario_contract.article.metadata import ArticleMetadata
+from diario_contract.enums.content_type import ContentType
+from diario_contract.gazette.edition import GazetteEdition
+from diario_contract.gazette.metadata import GazetteMetadata
 from diario_utils.storage import StorageClient, StorageConfig
 
 client = StorageClient(StorageConfig(base_path="data", duckdb_path=":memory:"))
 
-gazettes = pl.DataFrame([
-    {"edition_id": "ed1", "city_id": "123", "publication_date": "2026-03-01"},
-])
-client.append_gazettes(gazettes, {"city_id": "123", "publication_date": "2026-03-01"})
+edition = GazetteEdition(
+    metadata=GazetteMetadata(
+        edition_id="ed1",
+        publication_date="2026-03-01",
+        edition_number=1,
+        supplement=False,
+        edition_type_id=1,
+        edition_type_name="regular",
+        pdf_url="http://example.com",
+    ),
+    articles=[
+        Article(
+            metadata=ArticleMetadata(
+                article_id="a1",
+                edition_id="ed1",
+                hierarchy_path=["root"],
+                title="title",
+                identifier="id-1",
+                protocol=None,
+            ),
+            content=ArticleContent(
+                raw_content="content", content_type=ContentType.TEXT
+            ),
+        )
+    ],
+)
+
+client.append_gazettes([edition], city_id="123")
 
 chunks = pl.DataFrame([
     {
