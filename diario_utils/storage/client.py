@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +9,7 @@ import duckdb
 import polars as pl
 from diario_contract.gazette.edition import GazetteEdition
 
+from diario_utils.logging.structlog_config import configure_structlog, get_logger
 from diario_utils.storage.base import Storage
 from diario_utils.storage.config import StorageConfig
 from diario_utils.storage.local import LocalStorage
@@ -20,8 +20,6 @@ from diario_utils.storage.paths import (
     month_from_date,
     table_filename,
 )
-
-logger = logging.getLogger(__name__)
 
 Layer = Literal["bronze", "silver", "gold"]
 
@@ -54,6 +52,11 @@ class StorageClient:
         if self.config.duckdb_path:
             self._duck_conn = duckdb.connect(self.config.duckdb_path)
             self._duck_conn.execute(f"SET threads TO {self.config.threads}")
+        self.logger = get_logger(
+            component="storage",
+            base_path=str(self.base_path),
+            duckdb_path=self.config.duckdb_path,
+        )
 
     # ----------------------------- helpers -----------------------------
     def _ensure_columns(
@@ -160,12 +163,14 @@ class StorageClient:
         table_path = partition / table_filename(table)
 
         # Merge with existing data (dedup keeping last)
+        existing_count = 0
         if table_path.exists():
             existing = self.backend.read_parquet(
                 str(table_path.relative_to(self.base_path))
             )
             existing, df = self._align_frames(existing, df)
             combined = pl.concat([existing, df], how="diagonal")
+            existing_count = existing.height
         else:
             combined = df
 
@@ -181,6 +186,21 @@ class StorageClient:
 
         manifest = Manifest.from_file(table_path, schema_version=schema_version)
         manifest.save()
+        self.logger.info(
+            "write_table",
+            layer=layer,
+            table=table,
+            city_id=city_id,
+            publication_month=month,
+            parser_tag=parser_tag,
+            embedding_model_tag=embedding_model_tag,
+            rows_in=df.height,
+            rows_existing=existing_count,
+            rows_written=combined.height,
+            manifest_path=str(manifest.path),
+            manifest_sha256=manifest.sha256,
+            schema_version=schema_version,
+        )
         return table_path
 
     def _scan_partition(
@@ -343,6 +363,15 @@ class StorageClient:
                     articles_path=articles_path,
                 )
             )
+            self.logger.info(
+                "append_gazettes",
+                city_id=city_id,
+                publication_month=month,
+                editions=len(month_editions),
+                articles=len(article_rows),
+                gazette_path=str(gaz_path),
+                articles_path=str(articles_path) if articles_path else None,
+            )
 
         return results
 
@@ -362,7 +391,7 @@ class StorageClient:
             embedding_model_tag = embedding_model_tag or partition_keys.get(
                 "embedding_model_tag"
             )
-        return self._write_table(
+        path = self._write_table(
             layer=layer,
             table="chunks",
             df=df,
@@ -372,6 +401,17 @@ class StorageClient:
             embedding_model_tag=embedding_model_tag,
             schema_version=schema_version,
         )
+        safe_keys = {k: str(v) for k, v in partition_keys.items()}
+        self.logger.info(
+            "append_chunks",
+            layer=layer,
+            rows=df.height,
+            parser_tag=parser_tag,
+            embedding_model_tag=embedding_model_tag,
+            partition_keys=safe_keys,
+            path=str(path),
+        )
+        return path
 
     def append_vectors(
         self,
@@ -386,7 +426,7 @@ class StorageClient:
         )
         if embedding_model_tag is None:
             raise ValueError("embedding_model_tag is required for vectors")
-        return self._write_table(
+        path = self._write_table(
             layer="gold",
             table="vectors",
             df=df,
@@ -395,6 +435,15 @@ class StorageClient:
             embedding_model_tag=embedding_model_tag,
             schema_version=schema_version,
         )
+        safe_keys = {k: str(v) for k, v in partition_keys.items()}
+        self.logger.info(
+            "append_vectors",
+            rows=df.height,
+            embedding_model_tag=embedding_model_tag,
+            partition_keys=safe_keys,
+            path=str(path),
+        )
+        return path
 
     # ----------------------------- reads -------------------------------
     def load_gazettes(
@@ -536,6 +585,12 @@ class StorageClient:
         reviewed = df.filter(pl.col("needs_review") == True)  # noqa: E712
         if limit:
             reviewed = reviewed.head(limit)
+        self.logger.info(
+            "list_needing_review",
+            city_id=city_id,
+            returned=reviewed.height,
+            limit=limit,
+        )
         return reviewed
 
     def apply_review(
@@ -607,7 +662,15 @@ class StorageClient:
                     if "parser_tag" in part_df.columns
                     else None,
                 )
-        return updated.filter(mask_expr)
+        result = updated.filter(mask_expr)
+        self.logger.info(
+            "apply_review",
+            chunk_id=chunk_id,
+            reviewer_id=reviewer_id,
+            status=status,
+            change_log=bool(change_log),
+        )
+        return result
 
     def promote_to_gold(
         self,
@@ -651,6 +714,13 @@ class StorageClient:
                     embedding_model_tag=embedding_model_tag,
                 )
                 paths.append(path)
+        self.logger.info(
+            "promote_to_gold",
+            chunk_count=promoted.height,
+            embedding_model_tag=embedding_model_tag,
+            retrieval_profile=retrieval_profile,
+            paths=[str(p) for p in paths],
+        )
         return paths[-1] if paths else None
 
     # ----------------------------- logging -----------------------------
@@ -667,14 +737,20 @@ class StorageClient:
         log_file = (
             Path(log_path) if log_path else self.base_path / "logs" / "ingestion.log"
         )
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        line = {
-            "run_id": run_id,
-            "layer": layer,
-            "tag": tag,
-            "row_count": row_count,
-            "status": status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        with log_file.open("a", encoding="utf-8") as f:
-            f.write(f"{line}\n")
+        configure_structlog(log_file=log_file)
+        logger = get_logger(
+            component="storage",
+            base_path=str(self.base_path),
+            run_id=run_id,
+            layer=layer,
+            tag=tag,
+        )
+        logger.info(
+            "storage_run",
+            run_id=run_id,
+            layer=layer,
+            tag=tag,
+            row_count=row_count,
+            status=status,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )

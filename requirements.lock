@@ -16,6 +16,8 @@ pydantic==2.12.5
     # via diario-contract
 pydantic-core==2.41.5
     # via pydantic
+structlog==24.4.0
+    # via diario-utils (pyproject.toml)
 typing-extensions==4.15.0
     # via
     #   pydantic

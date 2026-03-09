@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.0 - 2026-03-09
+- Adiciona logging estruturado com `structlog` ao `StorageClient` (eventos de append/review/promote) e ao `register_run`, emitindo JSON para stdout e `logs/ingestion.log`.
+- Inclui helper `configure_structlog`/`get_logger`, com testes cobrindo idempotência e registro em arquivo.
+- Atualiza versão do pacote para `1.4.0`, acrescenta dependência `structlog` e regenera lockfiles.
+
 ## 1.3.1 - 2026-03-08
 - Corrige concatenação de Parquet quando colunas `Null` recebem bytes, alinhando schemas antes de `append_gazettes` (evita erro “type Binary is incompatible with expected type Null”).
 - Aplica alinhamento de schema a todas as tabelas escritas por `_write_table`.

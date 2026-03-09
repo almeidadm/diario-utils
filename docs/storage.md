@@ -98,3 +98,10 @@ needing = client.list_needing_review()
 client.apply_review(chunk_id="c1", reviewer_id="alice", status="approved")
 client.promote_to_gold(["c1"], embedding_model_tag="e5-base", retrieval_profile="default")
 ```
+
+## Logging estruturado
+
+- O módulo `diario_utils.logging.structlog_config` fornece `configure_structlog` (idempotente) e `get_logger`.
+- Saída padrão: JSON lines em stdout; opcionalmente também em `${base_path}/logs/ingestion.log` com `configure_structlog(log_file=...)`.
+- Eventos emitidos pelo `StorageClient` incluem `write_table`, `append_gazettes`, `append_chunks`, `append_vectors`, `list_needing_review`, `apply_review`, `promote_to_gold` e `storage_run` (registro de execuções).
+- Campos registrados evitam conteúdos sensíveis (texto/bytes de chunks) e focam em metadados como `layer`, `table`, `city_id`, `publication_month`, contagens de linhas e hashes de manifest.

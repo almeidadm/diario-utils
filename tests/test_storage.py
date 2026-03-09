@@ -1,6 +1,9 @@
+import json
+import logging
 from pathlib import Path
 
 import polars as pl
+import structlog
 from diario_contract.article.article import Article
 from diario_contract.article.content import ArticleContent
 from diario_contract.article.metadata import ArticleMetadata
@@ -8,7 +11,18 @@ from diario_contract.enums.content_type import ContentType
 from diario_contract.gazette.edition import GazetteEdition
 from diario_contract.gazette.metadata import GazetteMetadata
 
+from diario_utils.logging.structlog_config import configure_structlog, get_logger
 from diario_utils.storage import Manifest, StorageClient, StorageConfig
+
+
+def _reset_structlog() -> None:
+    """Reset structlog/global logging between tests."""
+    logging.shutdown()
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
+    structlog.reset_defaults()
 
 
 def _build_edition(
@@ -178,3 +192,45 @@ def test_append_gazettes_groups_by_month(tmp_path: Path):
     months = {res.publication_month for res in results}
     assert months == {"202603", "202604"}
     assert all(res.gazette_path.exists() for res in results)
+
+
+def test_configure_structlog_idempotent(tmp_path: Path):
+    log_file = tmp_path / "logs" / "custom.log"
+    try:
+        configure_structlog(log_file=log_file)
+        configure_structlog(log_file=log_file)
+        logger = get_logger(component="test")
+        logger.info("hello", step=1)
+    finally:
+        _reset_structlog()
+
+    lines = log_file.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["event"] == "hello"
+    assert record["component"] == "test"
+    assert record["step"] == 1
+    assert "timestamp" in record
+
+
+def test_register_run_structlog_output(tmp_path: Path):
+    client = StorageClient(StorageConfig(base_path=tmp_path, duckdb_path=":memory:"))
+    try:
+        client.register_run(
+            run_id="run-1", layer="silver", tag="v1", row_count=5, status="ok"
+        )
+    finally:
+        _reset_structlog()
+
+    log_file = tmp_path / "logs" / "ingestion.log"
+    assert log_file.exists()
+    lines = log_file.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["event"] == "storage_run"
+    assert record["run_id"] == "run-1"
+    assert record["layer"] == "silver"
+    assert record["tag"] == "v1"
+    assert record["row_count"] == 5
+    assert record["status"] == "ok"
+    assert "timestamp" in record

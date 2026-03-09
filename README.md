@@ -9,6 +9,7 @@ Shared infrastructure utilities for the Diario RAG ETL, focused on local medalli
 - StorageClient API for append/read/query across Bronze/Silver/Gold.
 - Local filesystem backend with manifests (hash + row_count + schema_version).
 - Review and promotion helpers to move Silver chunks to Gold.
+- Structured JSON logging with `structlog`, including ingestion run records in `logs/ingestion.log`.
 - Ready for future cloud backends via pluggable StorageBackend.
 
 ## Quick start
