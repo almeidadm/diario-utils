@@ -350,7 +350,7 @@ class StorageClient:
                     layer="bronze",
                     table="articles",
                     df=articles_df,
-                    key_columns=["identifier"],
+                    key_columns=["identifier", "article_id"],
                     partition_keys={"city_id": city_id, "month": month},
                     schema_version=schema_version,
                 )
