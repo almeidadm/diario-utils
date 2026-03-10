@@ -4,8 +4,6 @@ annotated-types==0.7.0
     # via pydantic
 diario-contract @ git+https://github.com/almeidadm/diario-contract@e7c052363dc208497def952ba17953a6ac7a6750
     # via diario-utils (pyproject.toml)
-duckdb==1.4.4
-    # via diario-utils (pyproject.toml)
 polars==0.20.31
     # via diario-utils (pyproject.toml)
 pyarrow==22.0.0

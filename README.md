@@ -1,9 +1,10 @@
 # diario-utils
 
-Shared infrastructure utilities for the Diario RAG ETL, focused on local medallion storage (Bronze/Silver/Gold) using Parquet + DuckDB + Polars.
+Shared infrastructure utilities for the Diario RAG ETL, focused on local medallion storage (Bronze/Silver/Gold) using Parquet + Polars.
 
 ## Documentation
 - See `docs/index.md` for the Markdown docs entry point.
+- Content column rules: `docs/storage.md` (seção "Colunas de conteúdo").
 
 ## Highlights
 - StorageClient API for append/read/query across Bronze/Silver/Gold.

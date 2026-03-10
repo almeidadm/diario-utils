@@ -1,107 +1,38 @@
 # Storage medallion
 
-Este documento descreve o módulo de persistência local seguindo as camadas Bronze/Silver/Gold.
+Guia rápido do layout Parquet usado pelo `diario-utils` para Bronze/Silver/Gold.
+Foco especial nas colunas de conteúdo (`raw_content_*`, `text`, `content_path`, `content_type`) e como elas devem ser preenchidas para evitar deriva de schema.
 
-## Layout de diretórios
+## Colunas de conteúdo
 
-```text
-  data/
-    bronze/city_id=123/yyyymm=202603/
-      gazette.parquet
-      articles.parquet
-      manifest.json
-    silver/city_id=123/yyyymm=202603/parser_tag=v1/
-      chunks.parquet
-      manifest.json
-    gold/city_id=123/yyyymm=202603/embedding_model_tag=e5-base/
-      chunks.parquet
-      vectors.parquet
-      manifest.json
-    logs/ingestion.log
-```
+### Bronze — `articles.parquet`
+- `raw_content_text` (Utf8, nullable): versão texto quando o conteúdo original já está em texto/HTML extraído.
+- `raw_content_bytes` (Binary, nullable): bytes originais (ex.: PDF). Nunca preencha `raw_content_text` e `raw_content_bytes` ao mesmo tempo.
+- `content_type` (Utf8, obrigatório): valor do enum `ContentType` do `diario-contract` (`text`, `html`, `pdf`).
+- `content_path` (Utf8, nullable): caminho/URI para o blob original, quando existir. Útil para reprocessar ou extrair texto posteriormente.
 
-## Fluxo principal
+### Bronze — `gazettes.parquet`
+- Não armazena conteúdo bruto. Apenas metadados da edição (datas, ids, totais). `content_type` não é persistido aqui.
 
-```mermaid
-flowchart TD
-  A[append_gazettes] -->|bronze| B[gazette.parquet]
-  A -->|bronze| BA[articles.parquet]
-  B -->|filters| Q[query]
-  BA --> Q
-  C[append_chunks silver] -->|silver| D[chunks.parquet]
-  D --> E[list_needing_review]
-  E --> F[apply_review]
-  F --> G[promote_to_gold]
-  G --> H["chunks (gold)"]
-  I[append_vectors] --> H
-  H --> R["load_chunks (gold)"]
-  R --> Q
-```
+### Silver/Gold — `chunks.parquet` (Acts/TextChunk)
+- `text` (Utf8, obrigatório): texto normalizado do chunk/ato.
+- `content_path` (Utf8, nullable): caminho para o artefato bruto (PDF/HTML) do qual o texto foi extraído.
+- `content_type` (Utf8, obrigatório): enum `ContentType` do ato. Mantém o tipo original mesmo após extração de texto.
+- Não armazenamos bytes em Silver/Gold; apenas texto e referência ao blob.
 
-## Uso rápido
+### Tabela de referência (contrato → colunas persistidas)
 
-```python
-import polars as pl
-from diario_contract.article.article import Article
-from diario_contract.article.content import ArticleContent
-from diario_contract.article.metadata import ArticleMetadata
-from diario_contract.enums.content_type import ContentType
-from diario_contract.gazette.edition import GazetteEdition
-from diario_contract.gazette.metadata import GazetteMetadata
-from diario_utils.storage import StorageClient, StorageConfig
+| Contrato (`diario-contract`) | Camada/arquivo              | Colunas de conteúdo | Observações |
+| --- | --- | --- | --- |
+| `GazetteEdition`             | `bronze/{city}/{YYYYMM}/gazettes.parquet` | (nenhuma) | Só metadados de edição; conteúdo não guardado. |
+| `Article`                    | `bronze/{city}/{YYYYMM}/articles.parquet` | `raw_content_text`, `raw_content_bytes`, `content_type`, `content_path` | Preencher apenas um dos `raw_content_*`; `content_path` opcional. |
+| `ParsedChunk`                | `silver/{city}/{YYYYMM}/chunks.parquet`   | `text`, `content_path`, `content_type` | Texto normalizado; sem bytes. |
+| `Act` / `TextChunk`          | `silver` ou `gold` `chunks.parquet`       | `text`, `content_path`, `content_type` | Representação canônica armazenada; dedup por `chunk_id`. |
 
-client = StorageClient(StorageConfig(base_path="data", duckdb_path=":memory:"))
+## Estratégia de escrita e alinhamento
+- **Bronze:** separar `raw_content` em `raw_content_text` (Utf8) ou `raw_content_bytes` (Binary); manter ambas as colunas no schema e preencher a alternativa com `null` para evitar que Polars crie tipo `Null` diferente entre partições.
+- **Silver/Gold:** persistir apenas `text` + `content_path`; nunca escrever bytes. Copiar `content_type` do ato original.
+- **Conversão Article → Act (pipeline futura):** se o artigo veio em bytes, mantenha `content_path` apontando para o blob bruto e coloque o texto extraído em `text`; preserve o `content_type` original.
+- **Alinhamento de schema:** ao anexar (append), force dtypes esperadas (`Utf8` para texto e paths, `Binary` para bytes, `Utf8` para `content_type`) mesmo quando os valores são nulos; isso evita deriva de schema entre partições mensais.
+- **Deduplicação:** regras permanecem inalteradas (articles por `article_id`, acts/chunks por `chunk_id`); esta seção apenas esclarece semântica das colunas.
 
-edition = GazetteEdition(
-    metadata=GazetteMetadata(
-        edition_id="ed1",
-        publication_date="2026-03-01",
-        edition_number=1,
-        supplement=False,
-        edition_type_id=1,
-        edition_type_name="regular",
-        pdf_url="http://example.com",
-    ),
-    articles=[
-        Article(
-            metadata=ArticleMetadata(
-                article_id="a1",
-                edition_id="ed1",
-                hierarchy_path=["root"],
-                title="title",
-                identifier="id-1",
-                protocol=None,
-            ),
-            content=ArticleContent(
-                raw_content="content", content_type=ContentType.TEXT
-            ),
-        )
-    ],
-)
-
-client.append_gazettes([edition], city_id="123")
-
-chunks = pl.DataFrame([
-    {
-        "chunk_id": "c1",
-        "city_id": "123",
-        "publication_date": "2026-03-01",
-        "publication_month": "202603",
-        "text": "lorem",
-        "needs_review": True,
-        "parser_tag": "v1",
-    }
-])
-client.append_chunks(chunks, {"city_id": "123", "publication_date": "2026-03-01", "parser_tag": "v1"})
-
-needing = client.list_needing_review()
-client.apply_review(chunk_id="c1", reviewer_id="alice", status="approved")
-client.promote_to_gold(["c1"], embedding_model_tag="e5-base", retrieval_profile="default")
-```
-
-## Logging estruturado
-
-- O módulo `diario_utils.logging.structlog_config` fornece `configure_structlog` (idempotente) e `get_logger`.
-- Saída padrão: JSON lines em stdout; opcionalmente também em `${base_path}/logs/ingestion.log` com `configure_structlog(log_file=...)`.
-- Eventos emitidos pelo `StorageClient` incluem `write_table`, `append_gazettes`, `append_chunks`, `append_vectors`, `list_needing_review`, `apply_review`, `promote_to_gold` e `storage_run` (registro de execuções).
-- Campos registrados evitam conteúdos sensíveis (texto/bytes de chunks) e focam em metadados como `layer`, `table`, `city_id`, `publication_month`, contagens de linhas e hashes de manifest.

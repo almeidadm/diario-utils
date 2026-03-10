@@ -1,11 +1,10 @@
 [project]
 name = "diario-utils"
-version = "1.4.0"
+version = "1.5.0"
 description = "Shared infrastructure utilities for Diario RAG ETL"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pyarrow==22.0.0",
-    "duckdb>=0.10",
     "polars>=0.20,<0.21",
     "structlog>=24,<25",
     "diario-contract",
@@ -46,4 +45,4 @@ test = "pytest tests/ -v"
 
 
 [tool.uv.sources]
-diario-contract = { git = "https://github.com/almeidadm/diario-contract", rev = "v1.2.0" }
+diario-contract = { git = "https://github.com/almeidadm/diario-contract", rev = "v2.0.0" }

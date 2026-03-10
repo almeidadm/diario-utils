@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 - Inclui helper `configure_structlog`/`get_logger`, com testes cobrindo idempotência e registro em arquivo.
 - Atualiza versão do pacote para `1.4.0`, acrescenta dependência `structlog` e regenera lockfiles.
 
+## 1.5.0 - 2026-03-09
+- Reimplementa storage somente em Parquet/Polars, removendo dependência de DuckDB.
+- Documenta colunas de conteúdo (`raw_content_text`, `raw_content_bytes`, `content_path`, `content_type`, `text`) em `docs/storage.md` e adiciona tabela contrato→colunas.
+- Mantém API de revisão/promoção e deduplicação, alinhando schemas entre partições.
+
 ## 1.3.1 - 2026-03-08
 - Corrige concatenação de Parquet quando colunas `Null` recebem bytes, alinhando schemas antes de `append_gazettes` (evita erro “type Binary is incompatible with expected type Null”).
 - Aplica alinhamento de schema a todas as tabelas escritas por `_write_table`.
